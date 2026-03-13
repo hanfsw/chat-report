@@ -1,0 +1,1221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>会话数据分析平台</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+    <script src="https://unpkg.com/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts-wordcloud@2.1.0/dist/echarts-wordcloud.min.js"></script>
+    <style>
+        [v-cloak] {
+            display: none;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        }
+
+        /* KPI 卡片顶部色条 */
+        .kpi-card {
+            border-top: 3px solid;
+        }
+
+        .kpi-blue {
+            border-color: #2563eb;
+        }
+
+        .kpi-green {
+            border-color: #16a34a;
+        }
+
+        .kpi-amber {
+            border-color: #d97706;
+        }
+
+        .kpi-violet {
+            border-color: #7c3aed;
+        }
+
+        /* 导航 Tab */
+        .nav-tab {
+            border-bottom: 2px solid transparent;
+        }
+
+        .nav-tab-active {
+            border-bottom: 2px solid #2563eb;
+            color: #2563eb;
+        }
+
+        /* 会话列表激活态 */
+        .session-active {
+            background: #eff6ff;
+            border-left: 3px solid #2563eb;
+        }
+
+        /* 滚动条隐藏 */
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* 图表 hover */
+        .chart-card {
+            transition: box-shadow 0.15s;
+        }
+
+        .chart-card:hover {
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+        }
+
+        /* 聊天气泡 - ToB 专业风格 */
+        .bubble-user {
+            background: #1e40af;
+            color: #fff;
+            border-radius: 10px 10px 2px 10px;
+        }
+
+        .bubble-ai {
+            background: #ffffff;
+            color: #1e293b;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px 10px 10px 2px;
+        }
+
+        /* 数据集面板 */
+        .ds-item-active {
+            background: #eff6ff;
+            border-left: 3px solid #2563eb;
+        }
+
+        /* 漫游引导 */
+        .tour-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 9000;
+            pointer-events: none;
+        }
+
+        .tour-spotlight {
+            position: fixed;
+            border-radius: 8px;
+            box-shadow: 0 0 0 4px rgba(99, 179, 237, 0.6), 0 0 0 9999px rgba(0, 0, 0, 0.55);
+            transition: all 0.35s cubic-bezier(.4, 0, .2, 1);
+            pointer-events: none;
+            z-index: 9001;
+        }
+
+        .tour-card {
+            position: fixed;
+            z-index: 9002;
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+            width: 320px;
+            padding: 0;
+            overflow: hidden;
+            transition: all 0.35s cubic-bezier(.4, 0, .2, 1);
+        }
+
+        .tour-arrow-up::before {
+            content: '';
+            position: absolute;
+            top: -8px;
+            right: 24px;
+            border: 8px solid transparent;
+            border-top: 0;
+            border-bottom-color: #fff;
+        }
+    </style>
+</head>
+
+<body class="bg-slate-100">
+    <div id="app" v-cloak class="h-screen flex flex-col">
+
+        <!-- ===== 顶部导航栏 ===== -->
+        <header class="bg-slate-900 px-6 py-0 flex items-center justify-between shrink-0" style="height:52px;">
+            <!-- 左侧：品牌 -->
+            <div class="flex items-center space-x-3">
+                <svg class="w-5 h-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                    stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+                <span class="text-white font-semibold text-sm tracking-wide">会话数据分析平台</span>
+                <span class="text-slate-500 text-xs">|</span>
+                <span class="text-slate-400 text-xs">AI 对话质量监控</span>
+            </div>
+
+            <!-- 右侧：操作区 -->
+            <div class="flex items-center space-x-3">
+                <!-- 当前数据集信息 -->
+                <div v-if="rawData.length" class="text-xs text-slate-400 mr-1">
+                    <span class="text-slate-300 font-medium">{{ currentDatasetName }}</span>
+                    <span class="ml-1">· {{ rawData.length }} 条记录</span>
+                </div>
+
+                <!-- 数据集管理 -->
+                <div class="relative">
+                    <button @click="showDatasetPanel = !showDatasetPanel"
+                        class="flex items-center space-x-1.5 text-xs text-slate-300 border border-slate-600 px-3 py-1.5 rounded hover:border-slate-400 hover:text-white transition">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M4 7v10c0 2 1 3 3 3h10c2 0 3-1 3-3V7M4 7c0-2 1-3 3-3h10c2 0 3 1 3 3M4 7h16" />
+                        </svg>
+                        <span>数据集</span>
+                        <span class="bg-blue-600 text-white text-[10px] px-1.5 rounded-full font-bold">{{
+                            datasetIndex.length }}</span>
+                    </button>
+
+                    <!-- 数据集下拉面板 -->
+                    <div v-if="showDatasetPanel"
+                        class="absolute right-0 top-9 w-80 bg-white border border-slate-200 rounded-lg shadow-xl z-50 overflow-hidden">
+                        <div class="px-4 py-2.5 border-b bg-slate-50 flex justify-between items-center">
+                            <span class="text-xs font-semibold text-slate-600 uppercase tracking-wide">已保存数据集</span>
+                            <button @click="showDatasetPanel = false"
+                                class="text-slate-400 hover:text-slate-600 text-sm">✕</button>
+                        </div>
+                        <div v-if="datasetIndex.length === 0" class="px-4 py-6 text-center text-slate-400 text-xs">
+                            暂无数据，请先导入 Excel 文件
+                        </div>
+                        <div class="max-h-64 overflow-y-auto">
+                            <div v-for="ds in datasetIndex" :key="ds.id"
+                                :class="['flex items-center justify-between px-4 py-2.5 border-b cursor-pointer hover:bg-slate-50 transition', currentDatasetId === ds.id ? 'ds-item-active' : '']">
+                                <div class="flex-1 min-w-0" @click="switchDataset(ds.id)">
+                                    <div class="text-sm font-medium text-slate-800 truncate">{{ ds.name }}</div>
+                                    <div class="text-xs text-slate-400 mt-0.5">{{ ds.rows }} 条 · {{
+                                        formatTime(ds.uploadedAt) }}</div>
+                                </div>
+                                <button @click.stop="deleteDataset(ds.id)"
+                                    class="ml-2 text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50 shrink-0">删除</button>
+                            </div>
+                        </div>
+                        <div class="px-4 py-2 bg-slate-50 text-xs text-slate-400 text-center">点击切换当前数据集</div>
+                    </div>
+                </div>
+
+                <!-- 脚本生成器按钮 -->
+                <button @click="showScriptModal = true"
+                    class="flex items-center space-x-1.5 text-xs text-slate-300 border border-slate-600 px-3 py-1.5 rounded hover:border-slate-400 hover:text-white transition">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    <span>脚本生成</span>
+                </button>
+
+                <!-- 导入按钮 -->
+                <input type="file" id="fileInput" @change="handleFileUpload" class="hidden" accept=".xlsx,.xls">
+                <label for="fileInput"
+                    class="flex items-center space-x-1.5 text-xs bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 transition cursor-pointer font-medium">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                    <span>导入 Excel</span>
+                </label>
+            </div>
+        </header>
+
+        <!-- ===== 漫游引导 Tour ===== -->
+        <template v-if="tourActive">
+            <!-- spotlight 光圈 -->
+            <div class="tour-spotlight"
+                :style="{ left: tourRect.x+'px', top: tourRect.y+'px', width: tourRect.w+'px', height: tourRect.h+'px' }">
+            </div>
+            <!-- 卡片 -->
+            <div class="tour-card tour-arrow-up" :style="tourCardStyle">
+                <!-- 头部 -->
+                <div class="bg-blue-600 px-5 py-3 flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                        <span class="bg-white/20 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{{ tourStep
+                            + 1 }}/{{ tourSteps.length }}</span>
+                        <span class="text-white text-sm font-semibold">{{ tourSteps[tourStep].title }}</span>
+                    </div>
+                    <button @click="tourEnd"
+                        class="text-white/60 hover:text-white text-lg leading-none">&times;</button>
+                </div>
+                <!-- 内容 -->
+                <div class="px-5 py-4">
+                    <p class="text-slate-600 text-xs leading-relaxed">{{ tourSteps[tourStep].desc }}</p>
+                    <!-- 进度点 -->
+                    <div class="flex items-center justify-between mt-4">
+                        <div class="flex space-x-1.5">
+                            <span v-for="(_, i) in tourSteps" :key="i"
+                                :class="['w-1.5 h-1.5 rounded-full transition-colors', i === tourStep ? 'bg-blue-600' : 'bg-slate-200']"></span>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <button v-if="tourStep > 0" @click="tourPrev"
+                                class="text-xs text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded border border-slate-200 hover:bg-slate-50 transition">上一步</button>
+                            <button @click="tourNext"
+                                class="text-xs text-white bg-blue-600 hover:bg-blue-700 px-4 py-1.5 rounded transition font-medium">
+                                {{ tourStep === tourSteps.length - 1 ? '开始使用' : '下一步' }}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </template>
+
+        <!-- ===== 脚本生成器 Modal ===== -->
+        <div v-if="showScriptModal" class="fixed inset-0 z-50 flex items-center justify-center">
+            <div class="absolute inset-0 bg-black/50" @click="showScriptModal = false"></div>
+            <div class="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden flex flex-col"
+                style="max-height:90vh">
+                <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
+                    <div>
+                        <h2 class="font-semibold text-slate-800 text-sm">JS 数据抓取脚本生成器</h2>
+                        <p class="text-xs text-slate-400 mt-0.5">输入目标页面和时间范围，自动生成可执行脚本</p>
+                    </div>
+                    <button @click="showScriptModal = false"
+                        class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+                </div>
+                <div class="px-6 py-5 space-y-4 overflow-y-auto">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1.5">目标页面 URL</label>
+                        <input v-model="scriptUrl" type="text"
+                            placeholder="https://console.app.xxx.com/team/12/aiOps/agent/sessionLogs"
+                            class="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            @input="onScriptUrlChange">
+
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-600 mb-1.5">开始日期</label>
+                            <input v-model="scriptStartDate" type="date"
+                                class="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-600 mb-1.5">结束日期</label>
+                            <input v-model="scriptEndDate" type="date"
+                                class="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                    </div>
+                    <button @click="generateScript" :disabled="!scriptTeamId || !scriptStartDate || !scriptEndDate"
+                        class="w-full bg-blue-600 text-white text-sm py-2 rounded-lg hover:bg-blue-700 transition font-medium disabled:opacity-40 disabled:cursor-not-allowed">生成脚本</button>
+                    <div v-if="generatedScript" class="space-y-2">
+                        <div class="flex items-center justify-between">
+                            <label class="text-xs font-semibold text-slate-600">生成的脚本</label>
+                            <button @click="copyScript"
+                                class="flex items-center space-x-1 text-xs border px-2.5 py-1 rounded transition"
+                                :class="scriptCopied ? 'text-green-600 border-green-300 bg-green-50' : 'text-blue-600 border-blue-200 hover:bg-blue-50'">
+                                <span>{{ scriptCopied ? '✓ 已复制' : '复制脚本' }}</span>
+                            </button>
+                        </div>
+                        <textarea readonly :value="generatedScript"
+                            class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-xs font-mono bg-slate-950 text-green-400 resize-none focus:outline-none hide-scrollbar"
+                            style="height:180px"></textarea>
+                        <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 space-y-1.5">
+                            <div class="text-xs font-semibold text-amber-800">📋 使用步骤</div>
+                            <ol class="text-xs text-amber-700 space-y-1 list-decimal list-inside leading-relaxed">
+                                <li>点击上方「<b>复制脚本</b>」按钮</li>
+                                <li>在浏览器打开目标页面：<span class="font-mono bg-amber-100 px-1 rounded break-all">{{ scriptUrl
+                                        }}</span></li>
+                                <li>确保已登录该系统（页面正常显示数据）</li>
+                                <li>按 <kbd class="bg-white border border-amber-300 rounded px-1 font-mono">F12</kbd>
+                                    开发者工具 → 切换到 <b>Console 控制台</b></li>
+                                <li>粘贴脚本到输入框，按 <kbd
+                                        class="bg-white border border-amber-300 rounded px-1 font-mono">Enter</kbd> 执行
+                                </li>
+                                <li>等待控制台进度日志，完成后自动下载 <b>Excel</b></li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== 空状态 ===== -->
+        <main v-if="!rawData.length" class="flex-1 flex flex-col items-center justify-center bg-slate-100">
+            <div class="bg-white border border-slate-200 rounded-xl p-12 text-center max-w-md shadow-sm">
+                <svg class="w-14 h-14 text-slate-300 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                    stroke-width="1.5">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                        d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                </svg>
+                <h2 class="text-slate-700 font-semibold text-base mb-1">暂无数据</h2>
+                <p class="text-slate-400 text-sm mb-6">请导入 AI 会话记录 Excel 文件以开始分析</p>
+                <label for="fileInput"
+                    class="inline-flex items-center space-x-2 bg-blue-600 text-white text-sm px-5 py-2.5 rounded-lg hover:bg-blue-700 cursor-pointer transition font-medium">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                    <span>选择文件</span>
+                </label>
+                <p class="text-slate-300 text-xs mt-4">支持字段：助手名称、用户问题、AI回答、满意度等</p>
+            </div>
+        </main>
+
+        <!-- ===== 已上传状态 ===== -->
+        <main v-else class="flex-1 overflow-hidden flex flex-col bg-slate-100">
+
+            <!-- 导航标签栏 -->
+            <div class="bg-white border-b border-slate-200 px-6 flex items-end space-x-0">
+                <button v-for="t in tabs" :key="t.id" @click="activeTab = t.id"
+                    :class="['nav-tab px-5 py-3 text-sm font-medium transition-colors', activeTab === t.id ? 'nav-tab-active' : 'text-slate-500 hover:text-slate-700']">
+                    {{ t.name }}
+                </button>
+            </div>
+
+            <!-- 内容区 -->
+            <div class="flex-1 overflow-auto p-6">
+
+                <!-- ===== 统计看板 ===== -->
+                <div v-show="activeTab === 'stats'" class="space-y-5">
+
+                    <!-- KPI 卡片行 -->
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div class="kpi-card kpi-blue bg-white rounded-lg p-5 shadow-sm border border-slate-200">
+                            <div class="text-xs text-slate-500 font-medium uppercase tracking-wide mb-3">总提问次数</div>
+                            <div class="text-3xl font-bold text-slate-800">{{ rawData.length }}</div>
+                            <div class="text-xs text-slate-400 mt-1">条消息记录</div>
+                        </div>
+                        <div class="kpi-card kpi-green bg-white rounded-lg p-5 shadow-sm border border-slate-200">
+                            <div class="text-xs text-slate-500 font-medium uppercase tracking-wide mb-3">独立用户数</div>
+                            <div class="text-3xl font-bold text-slate-800">{{ stats.userCount }}</div>
+                            <div class="text-xs text-slate-400 mt-1">位活跃用户</div>
+                        </div>
+                        <div class="kpi-card kpi-amber bg-white rounded-lg p-5 shadow-sm border border-slate-200">
+                            <div class="text-xs text-slate-500 font-medium uppercase tracking-wide mb-3">平均响应耗时</div>
+                            <div class="text-3xl font-bold text-slate-800">{{ stats.avgDuration }}<span
+                                    class="text-lg font-normal text-slate-400 ml-1">s</span></div>
+                            <div class="text-xs text-slate-400 mt-1">秒/次</div>
+                        </div>
+                        <div class="kpi-card kpi-violet bg-white rounded-lg p-5 shadow-sm border border-slate-200">
+                            <div class="text-xs text-slate-500 font-medium uppercase tracking-wide mb-3">用户好评率</div>
+                            <div class="text-3xl font-bold text-slate-800">{{ stats.satisfactionRate }}<span
+                                    class="text-lg font-normal text-slate-400 ml-0.5">%</span></div>
+                            <div class="text-xs text-slate-400 mt-1">满意度评分</div>
+                        </div>
+                    </div>
+
+                    <!-- 图表区 -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="chart-card bg-white rounded-lg shadow-sm border border-slate-200 h-80"
+                            id="agentChart"></div>
+                        <div class="chart-card bg-white rounded-lg shadow-sm border border-slate-200 h-80"
+                            id="satisfactionChart"></div>
+                        <div class="chart-card bg-white rounded-lg shadow-sm border border-slate-200 h-80"
+                            id="userRankChart"></div>
+                        <div class="chart-card bg-white rounded-lg shadow-sm border border-slate-200 h-[700px] md:col-span-2"
+                            id="hotWordChart"></div>
+                        <div class="chart-card bg-white rounded-lg shadow-sm border border-slate-200 h-[500px] md:col-span-2"
+                            id="wordCloudChart"></div>
+                    </div>
+                </div>
+
+                <!-- ===== 会话回放 ===== -->
+                <div v-show="activeTab === 'replay'" class="h-full flex space-x-4">
+
+                    <!-- 左侧会话列表 -->
+                    <div
+                        class="w-80 bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden flex flex-col shrink-0">
+                        <div class="p-3 border-b border-slate-200 bg-slate-50">
+                            <input v-model="searchQuery" type="text" placeholder="搜索用户、标题、问题（/ 分隔多关键词）"
+                                class="w-full bg-white border border-slate-200 rounded px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500">
+                            <p class="text-[10px] text-slate-400 mt-1.5">点击图表条目可自动填入搜索词</p>
+                        </div>
+                        <div class="flex-1 overflow-y-auto hide-scrollbar">
+                            <div v-for="session in filteredSessions" :key="session.id" @click="selectSession(session)"
+                                :class="['px-4 py-3 border-b border-slate-100 cursor-pointer hover:bg-slate-50 transition', selectedSessionId === session.id ? 'session-active' : '']">
+                                <div class="flex justify-between items-center mb-1">
+                                    <span
+                                        class="text-[10px] font-semibold text-blue-600 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded truncate max-w-[140px]">{{
+                                        session.agent }}</span>
+                                    <span class="text-[10px] text-slate-400 shrink-0 ml-1">{{ formatTime(session.time)
+                                        }}</span>
+                                </div>
+                                <div class="text-xs font-medium text-slate-700 truncate mt-1">{{ session.title }}</div>
+                                <div class="text-[10px] text-slate-400 mt-1 flex items-center space-x-2">
+                                    <span>{{ session.userName }}</span>
+                                    <span class="text-slate-300">·</span>
+                                    <span>{{ session.messages.length }} 轮对话</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 右侧对话详情 -->
+                    <div
+                        class="flex-1 bg-white rounded-lg shadow-sm border border-slate-200 flex flex-col overflow-hidden">
+                        <template v-if="currentSession">
+                            <!-- 会话头部信息 -->
+                            <div
+                                class="px-6 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+                                <div>
+                                    <h3 class="font-semibold text-slate-800 text-sm">{{ currentSession.title }}</h3>
+                                    <p class="text-[10px] text-slate-400 mt-0.5">会话 ID: {{ currentSession.id }}</p>
+                                </div>
+                                <div class="flex items-center space-x-3 text-xs text-slate-500">
+                                    <span
+                                        class="bg-blue-50 border border-blue-100 text-blue-600 px-2 py-0.5 rounded text-[10px] font-medium">{{
+                                        currentSession.agent }}</span>
+                                    <span>{{ currentSession.userName }}</span>
+                                    <span class="text-slate-300">·</span>
+                                    <span>{{ currentSession.messages.length }} 轮</span>
+                                </div>
+                            </div>
+
+                            <!-- 对话记录 -->
+                            <div class="flex-1 overflow-y-auto p-5 space-y-5 bg-slate-50">
+                                <div v-for="(m, i) in currentSession.messages" :key="i" class="space-y-3">
+                                    <!-- 用户消息（右） -->
+                                    <div class="flex justify-end items-end space-x-2">
+                                        <span class="text-[10px] text-slate-400 shrink-0">{{ currentSession.userName
+                                            }}</span>
+                                        <div
+                                            class="bubble-user max-w-[75%] px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed shadow-sm">
+                                            {{ m.q }}
+                                        </div>
+                                    </div>
+                                    <!-- AI 回复（左） -->
+                                    <div class="flex justify-start items-end space-x-2">
+                                        <div class="bubble-ai max-w-[80%] px-4 py-3 shadow-sm">
+                                            <div
+                                                class="text-[10px] text-slate-400 mb-1.5 flex justify-between items-center">
+                                                <span class="font-medium">{{ currentSession.agent }}</span>
+                                                <span v-if="m.duration" class="ml-4 text-slate-300">{{ m.duration
+                                                    }}s</span>
+                                            </div>
+                                            <div class="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{{
+                                                m.a }}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                        <div v-else class="flex-1 flex flex-col items-center justify-center text-slate-400">
+                            <svg class="w-10 h-10 text-slate-200 mb-3" fill="none" viewBox="0 0 24 24"
+                                stroke="currentColor" stroke-width="1.5">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+                            </svg>
+                            <p class="text-sm">请从左侧选择一个会话</p>
+                        </div>
+                    </div>
+                </div>
+                <!-- ===== 全量提问浏览 ===== -->
+                <div v-show="activeTab === 'questions'" class="flex flex-col space-y-4" style="height:100%">
+
+                    <!-- 搜索 + 统计 -->
+                    <div
+                        class="bg-white border border-slate-200 rounded-lg px-4 py-3 flex items-center space-x-4 shrink-0">
+                        <div class="relative" style="flex:1;max-width:360px">
+                            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" fill="none"
+                                viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                            </svg>
+                            <input v-model="qSearch" type="text" placeholder="搜索问题内容、用户名、助手名..."
+                                class="w-full bg-slate-50 border border-slate-200 rounded pl-8 pr-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div class="text-xs text-slate-500 shrink-0">
+                            共 <span class="font-semibold text-slate-700">{{ allQuestions.length }}</span> 条
+                            <span v-if="qSearch" class="ml-1 text-blue-600">（已筛选）</span>
+                        </div>
+                        <div class="text-xs text-slate-400 shrink-0">每页 {{ Q_PAGE_SIZE }} 条 · 第 {{ qPage }}/{{
+                            qTotalPages }} 页</div>
+                    </div>
+
+                    <!-- 提问列表 -->
+                    <div class="bg-white border border-slate-200 rounded-lg overflow-auto" style="flex:1;min-height:0">
+                        <table class="w-full text-xs border-collapse">
+                            <thead class="sticky top-0 z-10">
+                                <tr class="bg-slate-50 border-b border-slate-200">
+                                    <th class="text-left px-4 py-2.5 text-slate-500 font-semibold" style="width:48px">#
+                                    </th>
+                                    <th class="text-left px-4 py-2.5 text-slate-500 font-semibold" style="width:100px">
+                                        用户</th>
+                                    <th class="text-left px-4 py-2.5 text-slate-500 font-semibold" style="width:100px">
+                                        助手</th>
+                                    <th class="text-left px-4 py-2.5 text-slate-500 font-semibold">用户提问</th>
+                                    <th class="text-left px-4 py-2.5 text-slate-500 font-semibold" style="width:140px">
+                                        时间</th>
+                                    <th class="text-left px-4 py-2.5 text-slate-500 font-semibold" style="width:72px">操作
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="(item, i) in pagedQuestions" :key="item.idx"
+                                    :class="['border-b border-slate-100 hover:bg-blue-50/40 transition', i % 2 === 1 ? 'bg-slate-50/50' : '']">
+                                    <td class="px-4 py-2.5 text-slate-400 font-mono">{{ item.idx }}</td>
+                                    <td class="px-4 py-2.5 text-slate-700 font-medium truncate" style="max-width:100px">
+                                        {{ item.user }}</td>
+                                    <td class="px-4 py-2.5">
+                                        <span
+                                            class="bg-blue-50 border border-blue-100 text-blue-600 px-1.5 py-0.5 rounded font-medium"
+                                            style="font-size:10px">{{ item.agent }}</span>
+                                    </td>
+                                    <td class="px-4 py-2.5 text-slate-700 leading-relaxed" style="max-width:0">
+                                        <div class="truncate">{{ item.question }}</div>
+                                    </td>
+                                    <td class="px-4 py-2.5 text-slate-400 whitespace-nowrap">{{ formatTime(item.time) }}
+                                    </td>
+                                    <td class="px-4 py-2.5">
+                                        <button @click="jumpToSession(item)"
+                                            class="text-blue-600 border border-blue-200 px-2 py-1 rounded hover:bg-blue-50 transition whitespace-nowrap"
+                                            style="font-size:10px">
+                                            查看会话
+                                        </button>
+                                    </td>
+                                </tr>
+                                <tr v-if="pagedQuestions.length === 0">
+                                    <td colspan="6" class="px-4 py-10 text-center text-slate-400">无匹配结果</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- 分页控件 -->
+                    <div class="flex items-center justify-center space-x-1.5 shrink-0 pb-1">
+                        <button @click="qPage = 1" :disabled="qPage === 1"
+                            class="px-2.5 py-1.5 text-xs border border-slate-200 rounded text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed">首页</button>
+                        <button @click="qPage--" :disabled="qPage === 1"
+                            class="px-2.5 py-1.5 text-xs border border-slate-200 rounded text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed">上一页</button>
+                        <template v-for="p in qTotalPages" :key="p">
+                            <button v-if="p === 1 || p === qTotalPages || Math.abs(p - qPage) <= 2" @click="qPage = p"
+                                :class="['px-2.5 py-1.5 text-xs border rounded', p === qPage ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-200 text-slate-500 hover:bg-slate-100']">
+                                {{ p }}
+                            </button>
+                            <span v-else-if="p === qPage - 3 || p === qPage + 3"
+                                class="text-slate-400 text-xs px-0.5">…</span>
+                        </template>
+                        <button @click="qPage++" :disabled="qPage === qTotalPages"
+                            class="px-2.5 py-1.5 text-xs border border-slate-200 rounded text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed">下一页</button>
+                        <button @click="qPage = qTotalPages" :disabled="qPage === qTotalPages"
+                            class="px-2.5 py-1.5 text-xs border border-slate-200 rounded text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed">末页</button>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, watch, nextTick } = Vue;
+
+        createApp({
+            setup() {
+                const rawData = ref([]);
+                const activeTab = ref('stats');
+                const searchQuery = ref('');
+                const selectedSessionId = ref(null);
+                const tabs = [
+                    { id: 'stats', name: '数据统计看板' },
+                    { id: 'replay', name: '会话回放查询' },
+                    { id: 'questions', name: '全量提问浏览' }
+                ];
+
+                // ───── 多数据集本地存储 ─────
+                const DS_INDEX_KEY = 'ai_chat_ds_index'; // 存数据集元信息列表
+                const dsDataKey = (id) => `ai_chat_ds_${id}`;
+
+                const datasetIndex = ref([]); // [{id, name, uploadedAt, rows}]
+                const currentDatasetId = ref(null);
+                const currentDatasetName = ref('');
+                const showDatasetPanel = ref(false);
+
+                // 读取索引
+                const loadIndex = () => {
+                    try { datasetIndex.value = JSON.parse(localStorage.getItem(DS_INDEX_KEY) || '[]'); }
+                    catch (e) { datasetIndex.value = []; }
+                };
+                const saveIndex = () => localStorage.setItem(DS_INDEX_KEY, JSON.stringify(datasetIndex.value));
+
+                // 加载某个数据集到视图
+                const loadDataset = (id) => {
+                    const key = dsDataKey(id);
+                    try {
+                        const data = JSON.parse(localStorage.getItem(key) || 'null');
+                        if (!data) return;
+                        rawData.value = data;
+                        currentDatasetId.value = id;
+                        const meta = datasetIndex.value.find(d => d.id === id);
+                        currentDatasetName.value = meta ? meta.name : '';
+                        processStats();
+                        nextTick(() => initCharts());
+                    } catch (e) { console.warn('加载数据集失败', e); }
+                };
+
+                const switchDataset = (id) => {
+                    showDatasetPanel.value = false;
+                    loadDataset(id);
+                };
+
+                const deleteDataset = (id) => {
+                    localStorage.removeItem(dsDataKey(id));
+                    datasetIndex.value = datasetIndex.value.filter(d => d.id !== id);
+                    saveIndex();
+                    // 若删的是当前数据集，自动切换到最新的
+                    if (currentDatasetId.value === id) {
+                        if (datasetIndex.value.length > 0) {
+                            loadDataset(datasetIndex.value[0].id);
+                        } else {
+                            rawData.value = [];
+                            currentDatasetId.value = null;
+                            currentDatasetName.value = '';
+                        }
+                    }
+                };
+
+                // 页面初始化：加载最新数据集
+                loadIndex();
+                if (datasetIndex.value.length > 0) {
+                    loadDataset(datasetIndex.value[0].id);
+                }
+
+                const handleFileUpload = (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    // 重置 input 以便再次选同一文件
+                    e.target.value = '';
+                    const reader = new FileReader();
+                    reader.onload = (evt) => {
+                        const bstr = evt.target.result;
+                        const wb = XLSX.read(bstr, { type: 'binary' });
+                        const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+
+                        const id = Date.now().toString();
+                        const name = file.name.replace(/\.[^.]+$/, ''); // 去掉后缀
+                        const meta = { id, name, uploadedAt: new Date().toISOString(), rows: data.length };
+
+                        // 存数据体
+                        try {
+                            localStorage.setItem(dsDataKey(id), JSON.stringify(data));
+                        } catch (err) {
+                            alert('⚠️ 存储空间不足，该数据集未能保存到本地（数据量过大）。当前会话仍可正常使用。');
+                        }
+
+                        // 更新索引（最新的放最前）
+                        datasetIndex.value.unshift(meta);
+                        saveIndex();
+
+                        // 加载当前数据集
+                        rawData.value = data;
+                        currentDatasetId.value = id;
+                        currentDatasetName.value = name;
+                        processStats();
+                        initCharts();
+                        showDatasetPanel.value = false;
+                    };
+                    reader.readAsBinaryString(file);
+                };
+
+                const sessions = computed(() => {
+                    const groups = {};
+                    rawData.value.forEach(row => {
+                        const sid = row['会话ID'] || row['Session ID'] || 'unknown';
+                        if (!groups[sid]) {
+                            groups[sid] = {
+                                id: sid,
+                                time: row['对话时间'] || row['开始时间'],
+                                agent: row['助手名称'] || '默认助手',
+                                userName: row['用户名'] || '匿名',
+                                title: row['会话标题'] || '无标题会话',
+                                messages: []
+                            };
+                        }
+                        groups[sid].messages.push({
+                            q: row['用户问题'] || "",
+                            a: row['AI回答文本'] || row['AI回答'] || "",
+                            duration: row['耗时(秒)']
+                        });
+                    });
+                    return Object.values(groups).sort((a, b) => new Date(b.time) - new Date(a.time));
+                });
+
+                const filteredSessions = computed(() => {
+                    const q = searchQuery.value.trim().toLowerCase();
+                    if (!q) return sessions.value;
+                    const keywords = q.split('/').map(k => k.trim()).filter(k => k);
+                    return sessions.value.filter(s =>
+                        keywords.some(key =>
+                            s.userName.toLowerCase().includes(key) ||
+                            s.title.toLowerCase().includes(key) ||
+                            s.agent.toLowerCase().includes(key) ||
+                            s.id.toLowerCase().includes(key) ||
+                            s.messages.some(m => m.q.toLowerCase().includes(key))
+                        )
+                    );
+                });
+
+                const currentSession = computed(() => sessions.value.find(s => s.id === selectedSessionId.value));
+                const stats = ref({ userCount: 0, avgDuration: 0, satisfactionRate: 0 });
+
+                const processStats = () => {
+                    const users = new Set(rawData.value.map(r => r['用户名']));
+                    const durations = rawData.value.map(r => parseFloat(r['耗时(秒)']) || 0);
+                    const likes = rawData.value.filter(r => r['满意度'] === '赞').length;
+                    stats.value = {
+                        userCount: users.size,
+                        avgDuration: (durations.reduce((a, b) => a + b, 0) / (durations.length || 1)).toFixed(1),
+                        satisfactionRate: ((likes / (rawData.value.length || 1)) * 100).toFixed(1)
+                    };
+                };
+
+                const initCharts = () => {
+                    nextTick(() => {
+                        // 1. 助手图表
+                        const agentMap = {};
+                        rawData.value.forEach(r => agentMap[r['助手名称'] || '助手'] = (agentMap[r['助手名称'] || '助手'] || 0) + 1);
+                        const agentChart = echarts.init(document.getElementById('agentChart'));
+                        agentChart.setOption({
+                            title: { text: '助手调用分布', textStyle: { fontSize: 13, fontWeight: '600', color: '#334155' }, top: 16, left: 20 },
+                            tooltip: {},
+                            grid: { top: 56, left: 16, right: 16, bottom: 16, containLabel: true },
+                            xAxis: { type: 'category', data: Object.keys(agentMap), axisLabel: { rotate: 30, fontSize: 11 } },
+                            yAxis: { type: 'value' },
+                            series: [{ data: Object.values(agentMap), type: 'bar', itemStyle: { color: '#3b82f6', borderRadius: [3, 3, 0, 0] } }]
+                        });
+                        agentChart.on('click', p => { searchQuery.value = p.name; activeTab.value = 'replay'; });
+
+                        // 2. 满意度图表
+                        const satMap = { '赞': 0, '踩': 0, '无': 0 };
+                        rawData.value.forEach(r => satMap[r['满意度'] || '无'] = (satMap[r['满意度'] || '无'] || 0) + 1);
+                        const satisfactionChart = echarts.init(document.getElementById('satisfactionChart'));
+                        satisfactionChart.setOption({
+                            title: { text: '满意度分布', left: 'center', textStyle: { fontSize: 13, fontWeight: '600', color: '#334155' }, top: 16 },
+                            series: [{
+                                type: 'pie', radius: ['35%', '60%'],
+                                data: [
+                                    { value: satMap['赞'], name: '好评', itemStyle: { color: '#16a34a' } },
+                                    { value: satMap['踩'], name: '差评', itemStyle: { color: '#dc2626' } },
+                                    { value: satMap['无'], name: '无反馈', itemStyle: { color: '#cbd5e1' } }
+                                ],
+                                label: { fontSize: 11 }
+                            }]
+                        });
+
+                        // 3. 用户提问次数 Top10
+                        const userMsgCount = {};
+                        rawData.value.forEach(r => {
+                            const user = r['用户名'] || '匿名';
+                            userMsgCount[user] = (userMsgCount[user] || 0) + 1;
+                        });
+                        const topUsers = Object.entries(userMsgCount).sort((a, b) => b[1] - a[1]).slice(0, 10);
+                        const userRankChart = echarts.init(document.getElementById('userRankChart'));
+                        userRankChart.setOption({
+                            title: { text: 'TOP 10 用户提问次数', textStyle: { fontSize: 13, fontWeight: '600', color: '#334155' }, top: 16, left: 20 },
+                            tooltip: {},
+                            grid: { top: 56, left: 16, right: 60, bottom: 16, containLabel: true },
+                            xAxis: { type: 'value' },
+                            yAxis: { type: 'category', data: topUsers.map(i => i[0]).reverse(), axisLabel: { fontSize: 11 } },
+                            series: [{
+                                data: topUsers.map(i => i[1]).reverse(),
+                                type: 'bar',
+                                itemStyle: { color: '#7c3aed', borderRadius: [0, 3, 3, 0] },
+                                label: { show: true, position: 'right', fontSize: 11 }
+                            }]
+                        });
+                        userRankChart.on('click', p => { searchQuery.value = p.name; activeTab.value = 'replay'; });
+
+                        // 4. 30个高频词（过滤数字序号、##等噪声）
+                        const STOP_WORDS = new Set(['##', '#']);
+                        const NOISE_RE = /^(\d+[.、。]?|#+|[-*]+)$/;
+                        const wordFreq = {};
+                        rawData.value.forEach(r => {
+                            const text = (r['用户问题'] || "");
+                            text.split(/[的了是在有我你帮请查一下，。？?！!、 \n\t]/).forEach(w => {
+                                const word = w.trim();
+                                if (word.length < 2) return;
+                                if (STOP_WORDS.has(word)) return;
+                                if (NOISE_RE.test(word)) return;
+                                wordFreq[word] = (wordFreq[word] || 0) + 1;
+                            });
+                        });
+                        const topWords = Object.entries(wordFreq).sort((a, b) => b[1] - a[1]).slice(0, 30);
+                        const hotWordChart = echarts.init(document.getElementById('hotWordChart'));
+                        hotWordChart.setOption({
+                            title: { text: 'TOP 30 高频关键词', textStyle: { fontSize: 13, fontWeight: '600', color: '#334155' }, top: 16, left: 20 },
+                            tooltip: {},
+                            grid: { top: 56, left: 16, right: 60, bottom: 16, containLabel: true },
+                            xAxis: { type: 'value' },
+                            yAxis: { type: 'category', data: topWords.map(i => i[0]).reverse(), axisLabel: { fontSize: 11 } },
+                            series: [{
+                                data: topWords.map(i => i[1]).reverse(),
+                                type: 'bar',
+                                itemStyle: { color: '#d97706', borderRadius: [0, 3, 3, 0] },
+                                label: { show: true, position: 'right', fontSize: 11 }
+                            }]
+                        });
+                        hotWordChart.on('click', p => { searchQuery.value = p.name; activeTab.value = 'replay'; });
+
+                        // 5. 词云图
+                        const CLOUD_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#ea580c', '#4f46e5', '#0d9488'];
+                        const wordCloudData = Object.entries(wordFreq)
+                            .sort((a, b) => b[1] - a[1])
+                            .slice(0, 80)
+                            .map(([name, value]) => ({
+                                name,
+                                value,
+                                textStyle: { color: CLOUD_COLORS[Math.floor(Math.random() * CLOUD_COLORS.length)] }
+                            }));
+                        const wordCloudChart = echarts.init(document.getElementById('wordCloudChart'));
+                        wordCloudChart.setOption({
+                            title: { text: '用户提问词云', left: 'center', textStyle: { fontSize: 13, fontWeight: '600', color: '#334155' }, top: 16 },
+                            tooltip: { show: true, formatter: p => `${p.name}: ${p.value}次` },
+                            series: [{
+                                type: 'wordCloud',
+                                shape: 'circle',
+                                left: 'center',
+                                top: 'center',
+                                width: '90%',
+                                height: '85%',
+                                sizeRange: [14, 72],
+                                rotationRange: [-45, 45],
+                                rotationStep: 15,
+                                gridSize: 10,
+                                drawOutOfBound: false,
+                                textStyle: { fontFamily: 'sans-serif', fontWeight: 'bold' },
+                                emphasis: { textStyle: { shadowBlur: 10, shadowColor: '#333' } },
+                                data: wordCloudData
+                            }]
+                        });
+                        wordCloudChart.on('click', p => { searchQuery.value = p.name; activeTab.value = 'replay'; });
+                    });
+                };
+
+                const selectSession = (s) => { selectedSessionId.value = s.id; };
+                const formatTime = (ts) => ts ? new Date(ts).toLocaleString() : '';
+
+                // ───── 全量提问浏览 ─────
+                const qSearch = ref('');
+                const qPage = ref(1);
+                const Q_PAGE_SIZE = 50;
+
+                const allQuestions = computed(() => {
+                    const q = qSearch.value.trim().toLowerCase();
+                    const list = rawData.value.map((r, idx) => ({
+                        idx: idx + 1,
+                        question: r['用户问题'] || '',
+                        user: r['用户名'] || '匿名',
+                        agent: r['助手名称'] || '助手',
+                        time: r['对话时间'] || r['开始时间'] || '',
+                        sessionId: r['会话ID'] || r['Session ID'] || ''
+                    })).filter(item => item.question);
+                    if (!q) return list;
+                    return list.filter(item =>
+                        item.question.toLowerCase().includes(q) ||
+                        item.user.toLowerCase().includes(q) ||
+                        item.agent.toLowerCase().includes(q)
+                    );
+                });
+
+                const qTotalPages = computed(() => Math.max(1, Math.ceil(allQuestions.value.length / Q_PAGE_SIZE)));
+
+                const pagedQuestions = computed(() => {
+                    const start = (qPage.value - 1) * Q_PAGE_SIZE;
+                    return allQuestions.value.slice(start, start + Q_PAGE_SIZE);
+                });
+
+                watch(qSearch, () => { qPage.value = 1; });
+
+                const jumpToSession = (item) => {
+                    searchQuery.value = item.sessionId || item.user;
+                    activeTab.value = 'replay';
+                };
+
+                // ───── 脚本生成器 ─────
+                const showScriptModal = ref(false);
+                const scriptUrl = ref('');
+                const scriptTeamId = ref('');
+                const scriptStartDate = ref('');
+                const scriptEndDate = ref('');
+                const generatedScript = ref('');
+                const scriptCopied = ref(false);
+
+                const onScriptUrlChange = () => {
+                    const m = scriptUrl.value.match(/\/team\/(\d+)\//);
+                    scriptTeamId.value = m ? m[1] : '';
+                };
+
+                const generateScript = () => {
+                    const start = scriptStartDate.value + ' 00:00:00';
+                    const end = scriptEndDate.value + ' 23:59:59';
+                    generatedScript.value = `(async () => {
+    console.log("🚀 开始运行终极修复版抓取脚本 (严格字符限制)...");
+
+    if (typeof XLSX === 'undefined') {
+        await new Promise(resolve => {
+            const script = document.createElement('script');
+            script.src = "https://unpkg.com/xlsx/dist/xlsx.full.min.js";
+            script.onload = resolve;
+            document.head.appendChild(script);
+        });
+    }
+
+    const CONFIG = {
+        host: window.location.origin,
+        teamId: '${scriptTeamId.value}',
+        startDate: '${start}',
+        endDate: '${end}',
+        pageSize: 15
+    };
+
+    // 严格截断函数：Excel 单单元格硬限制是 32767，我们按 30000 截断
+    function forceLimit(val) {
+        if (typeof val !== 'string') return val;
+        const SAFE_LIMIT = 30000; 
+        if (val.length > SAFE_LIMIT) {
+            return val.substring(0, SAFE_LIMIT) + "...[内容过长已被强行截断]";
+        }
+        return val;
+    }
+
+    function parseContentToText(contentStr) {
+        if (!contentStr) return "";
+        try {
+            const data = JSON.parse(contentStr);
+            if (Array.isArray(data)) return data.map(item => item.text || "").join("");
+            if (typeof data === 'object' && data !== null) {
+                if (data.type === 'text') return data.text || "";
+                if (data.type === 'plan') return \`【计划】\${data.summary || ""}\`;
+                if (data.type === 'function_call') return \`【工具调用: \${data.name || data.key}\}\`;
+                if (data.type === 'function_call_output') return \`【工具返回: \${data.invokeStatus}\}\`;
+                return data.text || data.summary || "[复杂对象内容]";
+            }
+            return String(data);
+        } catch (e) { return String(contentStr); }
+    }
+
+    function assembleReply(answers) {
+        if (!answers || !Array.isArray(answers)) return "";
+        return answers
+            .map(ans => parseContentToText(ans.content))
+            .filter(t => t.length > 0)
+            .join("\\n---\\n");
+    }
+
+    const rawCollectedData = [];
+    let currentPage = 1;
+
+    async function request(path, body) {
+        const res = await fetch(\`\${CONFIG.host}\${path}\`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Trantor2-Team': CONFIG.teamId,
+                'Trantor2-TrantorTeamDTO': CONFIG.teamId,
+            },
+            body: JSON.stringify(body)
+        });
+        return await res.json();
+    }
+
+    try {
+        while (true) {
+            console.log(\`📦 正在抓取第 \${currentPage} 页列表...\`);
+            const listRes = await request('/api/trantor/ai/history/statistics', {
+                pageNumber: currentPage,
+                pageSize: CONFIG.pageSize,
+                createdAtStart: CONFIG.startDate,
+                createdAtEnd: CONFIG.endDate
+            });
+
+            const agents = listRes.data?.data || [];
+            if (agents.length === 0) break;
+
+            for (const agent of agents) {
+                for (const conv of (agent.conversations || [])) {
+                    console.log(\`  🔍 详情: \${conv.title.substring(0,10)}...\`);
+                    const detailRes = await request('/api/trantor/ai/history/message', {
+                        conversationId: conv.id,
+                        pageSize: 500
+                    });
+
+                    const messages = detailRes.data?.data || [];
+                    messages.forEach(msg => {
+                        if (msg.role === 'user') {
+                            // 先存入原始提取内容
+                            rawCollectedData.push({
+                                '对话时间': conv.startedAt,
+                                '助手名称': agent.agentName,
+                                '用户名': conv.createdByName,
+                                '会话标题': conv.title,
+                                '用户问题': parseContentToText(msg.content),
+                                'AI回答文本': assembleReply(msg['#answers']),
+                                '耗时(秒)': conv.duration,
+                                '满意度': conv.userLikeCount > 0 ? '赞' : (conv.userDislikeCount > 0 ? '踩' : '无'),
+                                '会话ID': conv.id
+                            });
+                        }
+                    });
+                }
+            }
+            if (agents.length < CONFIG.pageSize) break;
+            currentPage++;
+            await new Promise(r => setTimeout(r, 300));
+        }
+
+        console.log(\`✨ 抓取完成 (\${rawCollectedData.length}条)，正在进行安全脱敏与截断...\`);
+
+        // 核心修复步骤：在导出前强制清洗所有字段
+        const sanitizedData = rawCollectedData.map(row => {
+            const newRow = {};
+            for (let key in row) {
+                // 确保每个单元格都不超过 30000 字符
+                newRow[key] = forceLimit(row[key]);
+            }
+            return newRow;
+        });
+
+        const ws = XLSX.utils.json_to_sheet(sanitizedData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "AI日志");
+        
+        console.log("💾 正在生成文件...");
+        XLSX.writeFile(wb, \`AI_Logs_Final_Safe_\${Date.now()}.xlsx\`);
+        console.log("✅ 导出成功！如果浏览器没弹出下载，请检查弹窗拦截设置。");
+
+    } catch (err) {
+        console.error("❌ 严重错误:", err);
+        alert("导出失败，请看控制台具体报错内容");
+    }
+})();`;
+                };
+
+                const copyScript = async () => {
+                    try {
+                        await navigator.clipboard.writeText(generatedScript.value);
+                        scriptCopied.value = true;
+                        setTimeout(() => { scriptCopied.value = false; }, 2000);
+                    } catch (e) {
+                        // fallback
+                        const ta = document.createElement('textarea');
+                        ta.value = generatedScript.value;
+                        document.body.appendChild(ta);
+                        ta.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(ta);
+                        scriptCopied.value = true;
+                        setTimeout(() => { scriptCopied.value = false; }, 2000);
+                    }
+                };
+
+                // ───── 漫游式引导 Tour ─────
+                const tourActive = ref(false);
+                const tourStep = ref(0);
+                const tourRect = ref({ x: 0, y: 0, w: 0, h: 0 });
+                const tourCardStyle = ref({});
+                const tourSteps = [
+                    {
+                        target: '#btn-script-gen',
+                        title: '第一步：生成抓取脚本',
+                        desc: '点击此处打开脚本生成器，输入目标系统的 URL 和需要分析的时间范围，系统会自动为您生成一段专属的数据抓取代码。'
+                    },
+                    {
+                        target: '.tour-step-console', // 虚拟步骤，无强绑定高亮，高亮自身
+                        title: '第二步：在目标系统执行脚本',
+                        desc: '复制刚才生成的脚本代码；然后在浏览器中打开刚刚填写的"目标页面"；按下 F12 打开开发者工具，在 Console（控制台）粘贴代码并按回车执行。稍等片刻，它会自动帮您下载一份 Excel 数据文件。'
+                    },
+                    {
+                        target: '#btn-import-excel',
+                        title: '第三步：导入数据分析',
+                        desc: '拿到刚刚下载好的 Excel 文件后，点击这边的「导入 Excel」按钮把它传上来，系统就会帮您自动生成各种分析图表、并支持全量回放您的会话啦！'
+                    }
+                ];
+
+                const updateTourPosition = () => {
+                    if (!tourActive.value) return;
+                    const step = tourSteps[tourStep.value];
+                    let el = null;
+                    if (step.target && step.target !== '.tour-step-console') {
+                        el = document.querySelector(step.target);
+                    }
+
+                    if (el) {
+                        const rect = el.getBoundingClientRect();
+                        const pad = 6;
+                        tourRect.value = {
+                            x: rect.left - pad,
+                            y: rect.top - pad,
+                            w: rect.width + pad * 2,
+                            h: rect.height + pad * 2
+                        };
+                        // 计算卡片位置 (优先在下方，若空间不足则在左侧或上方)
+                        let top = rect.bottom + pad + 15;
+                        let left = rect.left + rect.width / 2 - 160; // 居中对话框 (宽320)
+
+                        // 修正左右边界
+                        if (left < 10) left = 10;
+                        if (left + 320 > window.innerWidth - 10) left = window.innerWidth - 330;
+
+                        tourCardStyle.value = { top: `${top}px`, left: `${left}px` };
+                    } else {
+                        // 无目标时居中显示 (如步骤2)
+                        tourRect.value = { x: window.innerWidth / 2, y: window.innerHeight / 2, w: 0, h: 0 };
+                        tourCardStyle.value = {
+                            top: '50%', left: '50%',
+                            transform: 'translate(-50%, -50%)',
+                            marginTop: '-20px'
+                        };
+                    }
+                };
+
+                const startTour = () => {
+                    tourStep.value = 0;
+                    tourActive.value = true;
+                    showScriptModal.value = false; // 确保关闭弹窗以防挡住
+                    nextTick(updateTourPosition);
+                    window.addEventListener('resize', updateTourPosition);
+                };
+
+                const tourNext = () => {
+                    if (tourStep.value < tourSteps.length - 1) {
+                        tourStep.value++;
+                        // 如果从步骤2(无高亮居中)进到步骤3，清掉 transform: translate
+                        if (tourStep.value === 2) {
+                            tourCardStyle.value.transform = 'none';
+                            tourCardStyle.value.marginTop = '0';
+                        }
+                        nextTick(updateTourPosition);
+                    } else {
+                        tourEnd();
+                    }
+                };
+
+                const tourPrev = () => {
+                    if (tourStep.value > 0) {
+                        tourStep.value--;
+                        if (tourStep.value !== 1) {
+                            tourCardStyle.value.transform = 'none';
+                            tourCardStyle.value.marginTop = '0';
+                        }
+                        nextTick(updateTourPosition);
+                    }
+                };
+
+                const tourEnd = () => {
+                    tourActive.value = false;
+                    window.removeEventListener('resize', updateTourPosition);
+                    localStorage.setItem('ai_chat_tour_done', '1');
+                };
+
+                // 若全新用户且无数据，自动启动引导
+                nextTick(() => {
+                    if (!localStorage.getItem('ai_chat_tour_done') && datasetIndex.value.length === 0) {
+                        setTimeout(startTour, 500);
+                    }
+                });
+
+                watch(activeTab, (val) => { if (val === 'stats' && rawData.value.length) initCharts(); });
+
+                return {
+                    handleFileUpload, rawData, tabs, activeTab, stats, filteredSessions, searchQuery,
+                    selectedSessionId, currentSession, selectSession, formatTime,
+                    datasetIndex, currentDatasetId, currentDatasetName, showDatasetPanel,
+                    switchDataset, deleteDataset,
+                    qSearch, qPage, qTotalPages, pagedQuestions, allQuestions, jumpToSession, Q_PAGE_SIZE,
+                    showScriptModal, scriptUrl, scriptTeamId, scriptStartDate, scriptEndDate,
+                    generatedScript, scriptCopied, onScriptUrlChange, generateScript, copyScript,
+                    tourActive, tourStep, tourSteps, tourRect, tourCardStyle, startTour, tourNext, tourPrev, tourEnd
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+
+</html>
