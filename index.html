@@ -397,11 +397,11 @@
                         <div class="chart-card bg-white rounded-lg shadow-sm border border-slate-200 h-80"
                             id="agentChart"></div>
                         <div class="chart-card bg-white rounded-lg shadow-sm border border-slate-200 h-80"
-                            id="satisfactionChart"></div>
-                        <div class="chart-card bg-white rounded-lg shadow-sm border border-slate-200 h-80"
                             id="userRankChart"></div>
                         <div class="chart-card bg-white rounded-lg shadow-sm border border-slate-200 h-[700px] md:col-span-2"
                             id="hotWordChart"></div>
+                        <div class="chart-card bg-white rounded-lg shadow-sm border border-slate-200 h-[700px] md:col-span-2"
+                            id="titleFreqChart"></div>
                         <div class="chart-card bg-white rounded-lg shadow-sm border border-slate-200 h-[500px] md:col-span-2"
                             id="wordCloudChart"></div>
                     </div>
@@ -772,24 +772,7 @@
                         });
                         agentChart.on('click', p => { searchQuery.value = p.name; activeTab.value = 'replay'; });
 
-                        // 2. 满意度图表
-                        const satMap = { '赞': 0, '踩': 0, '无': 0 };
-                        rawData.value.forEach(r => satMap[r['满意度'] || '无'] = (satMap[r['满意度'] || '无'] || 0) + 1);
-                        const satisfactionChart = echarts.init(document.getElementById('satisfactionChart'));
-                        satisfactionChart.setOption({
-                            title: { text: '满意度分布', left: 'center', textStyle: { fontSize: 13, fontWeight: '600', color: '#334155' }, top: 16 },
-                            series: [{
-                                type: 'pie', radius: ['35%', '60%'],
-                                data: [
-                                    { value: satMap['赞'], name: '好评', itemStyle: { color: '#16a34a' } },
-                                    { value: satMap['踩'], name: '差评', itemStyle: { color: '#dc2626' } },
-                                    { value: satMap['无'], name: '无反馈', itemStyle: { color: '#cbd5e1' } }
-                                ],
-                                label: { fontSize: 11 }
-                            }]
-                        });
-
-                        // 3. 用户提问次数 Top10
+                        // 2. 用户提问次数 Top10
                         const userMsgCount = {};
                         rawData.value.forEach(r => {
                             const user = r['用户名'] || '匿名';
@@ -843,7 +826,32 @@
                         });
                         hotWordChart.on('click', p => { searchQuery.value = p.name; activeTab.value = 'replay'; });
 
-                        // 5. 词云图
+                        // 5. 高频会话标题（全匹配）
+                        const titleFreq = {};
+                        sessions.value.forEach(s => {
+                            const t = (s.title || '').trim();
+                            if (t && t !== '无标题会话') {
+                                titleFreq[t] = (titleFreq[t] || 0) + 1;
+                            }
+                        });
+                        const topTitles = Object.entries(titleFreq).sort((a, b) => b[1] - a[1]).slice(0, 30);
+                        const titleFreqChart = echarts.init(document.getElementById('titleFreqChart'));
+                        titleFreqChart.setOption({
+                            title: { text: 'TOP 30 高频会话标题', textStyle: { fontSize: 13, fontWeight: '600', color: '#334155' }, top: 16, left: 20 },
+                            tooltip: { formatter: p => `${p.name}<br/>出现 <b>${p.value}</b> 次` },
+                            grid: { top: 56, left: 16, right: 72, bottom: 16, containLabel: true },
+                            xAxis: { type: 'value' },
+                            yAxis: { type: 'category', data: topTitles.map(i => i[0]).reverse(), axisLabel: { fontSize: 11, width: 340, overflow: 'truncate' } },
+                            series: [{
+                                data: topTitles.map(i => i[1]).reverse(),
+                                type: 'bar',
+                                itemStyle: { color: '#0891b2', borderRadius: [0, 3, 3, 0] },
+                                label: { show: true, position: 'right', fontSize: 11 }
+                            }]
+                        });
+                        titleFreqChart.on('click', p => { searchQuery.value = p.name; activeTab.value = 'replay'; });
+
+                        // 6. 词云图
                         const CLOUD_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#ea580c', '#4f46e5', '#0d9488'];
                         const wordCloudData = Object.entries(wordFreq)
                             .sort((a, b) => b[1] - a[1])
